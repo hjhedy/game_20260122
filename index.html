@@ -105,6 +105,7 @@
         if (data) {
           const oldQuestion = state.game.currentQuestion;
           const wasShowingAnswer = state.game.showAnswer;
+          const wasStarted = state.game.started;
           
           state.game = data;
           
@@ -113,15 +114,17 @@
             state.myAnswer = '';
             state.answered = false;
             state.usedHint = false;
+            forceRender();
+            return;
           }
           
-          // 開始新題目計時
-          if (data.started && !data.showAnswer && !data.ended) {
-            if (!state.isHost && data.timeLeft > 0) {
-              startLocalTimer();
-            }
+          // 遊戲開始或顯示答案時強制渲染
+          if (data.started !== wasStarted || data.showAnswer !== wasShowingAnswer) {
+            forceRender();
+            return;
           }
           
+          // 一般更新（時間倒數）- 只有在不輸入時才渲染
           render();
         }
       });
@@ -131,7 +134,10 @@
         const data = snap.val();
         if (data) {
           state.leaderboard = Object.values(data).sort((a, b) => b.score - a.score);
-          render();
+          // 排行榜更新不強制渲染，避免打斷輸入
+          if (!isInputFocused) {
+            render();
+          }
         }
       });
     }
@@ -249,7 +255,7 @@
 
     function useHint() {
       state.usedHint = true;
-      render();
+      forceRender();
     }
 
     // ========== 取得排名 ==========
@@ -258,8 +264,18 @@
       return idx >= 0 ? idx + 1 : null;
     }
 
+    // 防止重複渲染導致鍵盤消失
+    let isInputFocused = false;
+    let lastRenderTime = 0;
+
     // ========== 渲染 ==========
     function render() {
+      // 如果輸入框正在使用，不要重新渲染（防止鍵盤消失）
+      if (isInputFocused && Date.now() - lastRenderTime < 500) {
+        return;
+      }
+      lastRenderTime = Date.now();
+      
       const app = document.getElementById('app');
       
       switch(state.screen) {
@@ -271,6 +287,13 @@
       }
       
       bindEvents();
+    }
+    
+    // 強制渲染（忽略輸入狀態）
+    function forceRender() {
+      isInputFocused = false;
+      lastRenderTime = 0;
+      render();
     }
 
     // ========== 歡迎畫面 ==========
@@ -517,10 +540,9 @@
                   <span>目前 ${state.myScore} 分</span>
                 </div>
               ` : `
-                <!-- 主持人看到答案 -->
-                <div class="bg-yellow-50 border-2 border-yellow-300 rounded-2xl p-4 text-center">
-                  <p class="text-yellow-600 text-sm mb-1">📋 答案</p>
-                  <p class="text-2xl font-black text-yellow-700">${q.answer}</p>
+                <!-- 主持人：等待時間結束 -->
+                <div class="bg-gray-50 rounded-2xl p-4 text-center">
+                  <p class="text-gray-600">⏳ 等待玩家作答中...</p>
                 </div>
               `}
             </div>
@@ -621,7 +643,7 @@
           // 加入排行榜（初始0分）
           saveMyScore();
           state.screen = 'lobby';
-          render();
+          forceRender();
         }
       });
       
@@ -631,7 +653,7 @@
           state.isHost = true;
           state.playerName = '主持人';
           state.screen = 'lobby';
-          render();
+          forceRender();
         } else if (pwd !== null) {
           alert('密碼錯誤');
         }
@@ -641,32 +663,54 @@
       $('btnStartGame')?.addEventListener('click', hostStartGame);
       $('btnReset')?.addEventListener('click', resetGame);
       
-      // 遊戲中
-      $('answerInput')?.addEventListener('input', e => {
-        state.myAnswer = e.target.value;
-      });
-      
-      $('answerInput')?.addEventListener('keydown', e => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          submitAnswer();
-        }
-      });
-      
-      // 處理中文輸入法
-      $('answerInput')?.addEventListener('compositionend', e => {
-        state.myAnswer = e.target.value;
-      });
-      
-      $('btnSubmit')?.addEventListener('click', submitAnswer);
-      $('btnHint')?.addEventListener('click', useHint);
-      $('btnNextQuestion')?.addEventListener('click', hostNextQuestion);
-      
-      // 自動聚焦輸入框
+      // 遊戲中 - 輸入框處理
       const input = $('answerInput');
-      if (input && !state.answered) {
-        setTimeout(() => input.focus(), 100);
+      if (input) {
+        // 追蹤焦點狀態
+        input.addEventListener('focus', () => {
+          isInputFocused = true;
+        });
+        
+        input.addEventListener('blur', () => {
+          isInputFocused = false;
+        });
+        
+        // 即時更新答案
+        input.addEventListener('input', e => {
+          state.myAnswer = e.target.value;
+        });
+        
+        // Enter 送出
+        input.addEventListener('keydown', e => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            input.blur();
+            submitAnswer();
+          }
+        });
+        
+        // 中文輸入法完成
+        input.addEventListener('compositionend', e => {
+          state.myAnswer = e.target.value;
+        });
+        
+        // 防止觸控事件導致失焦
+        input.addEventListener('touchstart', e => {
+          e.stopPropagation();
+        });
       }
+      
+      $('btnSubmit')?.addEventListener('click', () => {
+        isInputFocused = false;
+        submitAnswer();
+      });
+      
+      $('btnHint')?.addEventListener('click', () => {
+        state.usedHint = true;
+        forceRender();
+      });
+      
+      $('btnNextQuestion')?.addEventListener('click', hostNextQuestion);
     }
 
     // ========== 初始化 ==========
