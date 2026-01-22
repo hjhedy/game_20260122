@@ -2,25 +2,42 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>忘年會 Emoji 猜謎大賽</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&family=Noto+Sans+TC:wght@400;700;900&display=swap" rel="stylesheet">
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
   <style>
     * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
-    body { font-family: 'Noto Sans TC', -apple-system, BlinkMacSystemFont, sans-serif; }
-    .emoji { font-family: 'Noto Color Emoji', 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif; }
-    input { font-size: 16px !important; } /* Prevent iOS zoom */
-    input[type="text"] { -webkit-appearance: none; appearance: none; }
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      -webkit-text-size-adjust: 100%;
+    }
+    .emoji { font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; }
+    
+    /* iOS 輸入框修正 */
+    input[type="text"] {
+      font-size: 18px !important;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      appearance: none;
+      border-radius: 16px;
+    }
+    input[type="text"]:focus {
+      outline: none;
+      font-size: 18px !important;
+    }
   </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
-  <div id="app"></div>
+  <div id="app">
+    <div class="min-h-screen flex items-center justify-center">
+      <p class="text-gray-500">載入中...</p>
+    </div>
+  </div>
 
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  
   <script>
     // ========== Firebase 設定 ==========
     const firebaseConfig = {
@@ -34,442 +51,338 @@
     };
 
     let db = null;
-    try {
-      firebase.initializeApp(firebaseConfig);
-      db = firebase.database();
-      console.log('Firebase connected');
-    } catch(e) {
-      console.log('Firebase error:', e);
-    }
-
-    // ========== 題庫（按順序：練習 → A組 → B組 → 挑戰）==========
-    const ALL_QUESTIONS = [
-      // 練習題 (2題)
-      { emoji: '🧅⛽🫓', answer: '蔥油餅', hint: '早餐', explain: '蔥＋油＋餅', round: '練習' },
-      { emoji: '🚗💦🐎🐲', answer: '車水馬龍', hint: '成語：熱鬧', explain: '車＋水＋馬＋龍', round: '練習' },
-      // A組 (7題)
-      { emoji: '🫅🌰🌈', answer: '王力宏', hint: '歌手', explain: '王＋力＋宏', round: 'A組' },
-      { emoji: '🥗1️⃣🌳', answer: '蔡依林', hint: '歌手', explain: '蔡＋依＋林', round: 'A組' },
-      { emoji: '🌹🪶🏰', answer: '紅毛城', hint: '台灣古蹟', explain: '紅＋毛＋城', round: 'A組' },
-      { emoji: '🐮🍖🍜', answer: '牛肉麵', hint: '台灣美食', explain: '牛＋肉＋麵', round: 'A組' },
-      { emoji: '🐷🩸🍰', answer: '豬血糕', hint: '夜市小吃', explain: '豬＋血＋糕', round: 'A組' },
-      { emoji: '🦆👅🧢', answer: '鴨舌帽', hint: '穿戴用品', explain: '鴨＋舌＋帽', round: 'A組' },
-      { emoji: '🖼️🐍➕🦶', answer: '畫蛇添足', hint: '成語', explain: '畫＋蛇＋添＋足', round: 'A組' },
-      // B組 (7題)
-      { emoji: '🐅🗣️🐍🍑', answer: '虎頭蛇尾', hint: '成語', explain: '虎＋頭＋蛇＋尾', round: 'B組' },
-      { emoji: '☀️🌙🌊', answer: '日月潭', hint: '台灣景點', explain: '日＋月＋潭', round: 'B組' },
-      { emoji: '🐔✈️🐕🦘', answer: '雞飛狗跳', hint: '成語', explain: '雞＋飛＋狗＋跳', round: 'B組' },
-      { emoji: '🌶️👶🐔', answer: '辣子雞', hint: '川菜', explain: '辣＋子＋雞', round: 'B組' },
-      { emoji: '🐑🍖🧵', answer: '羊肉串', hint: '燒烤', explain: '羊＋肉＋串', round: 'B組' },
-      { emoji: '🥬🗣️📝', answer: '菜英文', hint: '形容詞', explain: '菜＋英＋文', round: 'B組' },
-      { emoji: '💣🐔🦵', answer: '炸雞腿', hint: '速食', explain: '炸＋雞＋腿', round: 'B組' },
-      // 挑戰題 (2題)
-      { emoji: '💰🪡🍄', answer: '金針菇', hint: '蔬菜', explain: '金＋針＋菇', round: '挑戰' },
-      { emoji: '🐴🔜✅🎆', answer: '馬到成功', hint: '祝福語', explain: '馬＋到＋成＋功', round: '挑戰' },
-    ];
-
-    const TOTAL_QUESTIONS = ALL_QUESTIONS.length;
-    const HOST_PASSWORD = '2024';
-    const QUESTION_TIME = 20; // 每題20秒
-
-    // ========== 狀態 ==========
-    let state = {
-      screen: 'welcome', // welcome, lobby, game, result
-      isHost: false,
-      playerName: localStorage.getItem('playerName') || '',
-      // 遊戲狀態（從 Firebase 同步）
-      game: {
-        started: false,
-        currentQuestion: 0,
-        timeLeft: QUESTION_TIME,
-        showAnswer: false,
-        ended: false
-      },
-      // 玩家本地狀態
-      myAnswer: '',
-      myScore: 0,
-      answered: false,
-      usedHint: false,
-      leaderboard: []
-    };
-
-    let timerInterval = null;
-
-    // ========== Firebase 同步 ==========
-    function initFirebase() {
-      if (!db) return;
-      
-      // 監聽遊戲狀態
-      db.ref('game').on('value', snap => {
-        const data = snap.val();
-        if (data) {
-          const oldQuestion = state.game.currentQuestion;
-          const wasShowingAnswer = state.game.showAnswer;
-          const wasStarted = state.game.started;
-          
-          state.game = data;
-          
-          // 題目改變時重置玩家狀態
-          if (data.currentQuestion !== oldQuestion) {
-            state.myAnswer = '';
-            state.answered = false;
-            state.usedHint = false;
-            forceRender();
-            return;
-          }
-          
-          // 遊戲開始或顯示答案時強制渲染
-          if (data.started !== wasStarted || data.showAnswer !== wasShowingAnswer) {
-            forceRender();
-            return;
-          }
-          
-          // 一般更新（時間倒數）- 只有在不輸入時才渲染
-          render();
+    
+    // 等待 Firebase 載入
+    function initFirebaseConnection() {
+      try {
+        if (typeof firebase !== 'undefined') {
+          firebase.initializeApp(firebaseConfig);
+          db = firebase.database();
+          console.log('✅ Firebase connected');
+          initFirebaseListeners();
+        } else {
+          console.log('⚠️ Firebase not loaded, retrying...');
+          setTimeout(initFirebaseConnection, 500);
         }
-      });
-      
-      // 監聽排行榜
-      db.ref('leaderboard').on('value', snap => {
-        const data = snap.val();
-        if (data) {
-          state.leaderboard = Object.values(data).sort((a, b) => b.score - a.score);
-          // 排行榜更新不強制渲染，避免打斷輸入
-          if (!isInputFocused) {
-            render();
-          }
-        }
-      });
-    }
-
-    function updateGame(updates) {
-      if (!db) return;
-      db.ref('game').update(updates);
-    }
-
-    function saveMyScore() {
-      if (!db || !state.playerName) return;
-      const odplayerId = state.playerName.replace(/[.#$\/\[\]]/g, '_');
-      db.ref('leaderboard/' + odplayerId).set({
-        name: state.playerName,
-        score: state.myScore
-      });
-    }
-
-    function resetGame() {
-      if (!db) return;
-      if (confirm('確定要重置遊戲嗎？這會清除所有分數！')) {
-        db.ref('game').set({
-          started: false,
-          currentQuestion: 0,
-          timeLeft: QUESTION_TIME,
-          showAnswer: false,
-          ended: false
-        });
-        db.ref('leaderboard').remove();
-        state.myScore = 0;
-        state.myAnswer = '';
-        state.answered = false;
+      } catch(e) {
+        console.log('Firebase error:', e);
       }
     }
 
-    // ========== 計時器 ==========
-    function startLocalTimer() {
+    // ========== 題庫 ==========
+    const ALL_QUESTIONS = [
+      // 練習題 (2題)
+      { emoji: '🧅⛽🫓', answer: '蔥油餅', hint: '早餐', explain: '蔥＋油＋餅', round: '練習' },
+      { emoji: '🚗💦🐎🐲', answer: '車水馬龍', hint: '成語', explain: '車＋水＋馬＋龍', round: '練習' },
+      // A組 (7題)
+      { emoji: '🫅🌰🌈', answer: '王力宏', hint: '歌手', explain: '王＋力＋宏', round: 'A組' },
+      { emoji: '🥗1️⃣🌳', answer: '蔡依林', hint: '歌手', explain: '蔡＋依＋林', round: 'A組' },
+      { emoji: '🌹🪶🏰', answer: '紅毛城', hint: '古蹟', explain: '紅＋毛＋城', round: 'A組' },
+      { emoji: '🐮🍖🍜', answer: '牛肉麵', hint: '美食', explain: '牛＋肉＋麵', round: 'A組' },
+      { emoji: '🐷🩸🍰', answer: '豬血糕', hint: '小吃', explain: '豬＋血＋糕', round: 'A組' },
+      { emoji: '🦆👅🧢', answer: '鴨舌帽', hint: '穿戴', explain: '鴨＋舌＋帽', round: 'A組' },
+      { emoji: '🖼️🐍➕🦶', answer: '畫蛇添足', hint: '成語', explain: '畫＋蛇＋添＋足', round: 'A組' },
+      // B組 (7題)
+      { emoji: '🐅🗣️🐍🍑', answer: '虎頭蛇尾', hint: '成語', explain: '虎＋頭＋蛇＋尾', round: 'B組' },
+      { emoji: '☀️🌙🌊', answer: '日月潭', hint: '景點', explain: '日＋月＋潭', round: 'B組' },
+      { emoji: '🐔✈️🐕🦘', answer: '雞飛狗跳', hint: '成語', explain: '雞＋飛＋狗＋跳', round: 'B組' },
+      { emoji: '🌶️👶🐔', answer: '辣子雞', hint: '川菜', explain: '辣＋子＋雞', round: 'B組' },
+      { emoji: '🐑🍖🧵', answer: '羊肉串', hint: '燒烤', explain: '羊＋肉＋串', round: 'B組' },
+      { emoji: '🥬🗣️📝', answer: '菜英文', hint: '形容', explain: '菜＋英＋文', round: 'B組' },
+      { emoji: '💣🐔🦵', answer: '炸雞腿', hint: '速食', explain: '炸＋雞＋腿', round: 'B組' },
+      // 挑戰題 (2題)
+      { emoji: '💰🪡🍄', answer: '金針菇', hint: '蔬菜', explain: '金＋針＋菇', round: '挑戰' },
+      { emoji: '🐴🔜✅🎆', answer: '馬到成功', hint: '祝福', explain: '馬＋到＋成＋功', round: '挑戰' },
+    ];
+
+    const TOTAL = ALL_QUESTIONS.length;
+    const HOST_PWD = '2024';
+    const TIME_LIMIT = 20;
+
+    // ========== 狀態 ==========
+    let state = {
+      screen: 'welcome',
+      isHost: false,
+      name: localStorage.getItem('playerName') || '',
+      game: {
+        on: false,
+        q: 0,
+        time: TIME_LIMIT,
+        reveal: false,
+        done: false
+      },
+      ans: '',
+      score: 0,
+      submitted: false,
+      hinted: false,
+      board: []
+    };
+
+    let timer = null;
+    let inputEl = null;
+
+    // ========== Firebase ==========
+    function initFirebaseListeners() {
+      if (!db) return;
+      
+      db.ref('game').on('value', snap => {
+        const d = snap.val();
+        if (d) {
+          const oldQ = state.game.q;
+          const wasReveal = state.game.reveal;
+          const wasOn = state.game.on;
+          
+          state.game = d;
+          
+          // 新題目
+          if (d.q !== oldQ) {
+            state.ans = '';
+            state.submitted = false;
+            state.hinted = false;
+          }
+          
+          // 主持人計時
+          if (state.isHost && d.on && !d.reveal && !d.done) {
+            startHostTimer();
+          }
+          
+          // 重要變化才重繪
+          if (d.on !== wasOn || d.reveal !== wasReveal || d.q !== oldQ || d.done) {
+            draw();
+          }
+        }
+      });
+      
+      db.ref('board').on('value', snap => {
+        const d = snap.val();
+        state.board = d ? Object.values(d).sort((a,b) => b.score - a.score) : [];
+        // 不要在輸入時重繪
+        if (document.activeElement?.id !== 'ans') {
+          draw();
+        }
+      });
+    }
+
+    function setGame(obj) {
+      if (db) db.ref('game').update(obj);
+    }
+
+    function saveScore() {
+      if (!db || !state.name) return;
+      const id = state.name.replace(/[.#$\/\[\]]/g, '_');
+      db.ref('board/' + id).set({ name: state.name, score: state.score });
+    }
+
+    function resetAll() {
+      if (!confirm('確定重置？')) return;
+      if (db) {
+        db.ref('game').set({ on: false, q: 0, time: TIME_LIMIT, reveal: false, done: false });
+        db.ref('board').remove();
+      }
+      state.score = 0;
+      state.ans = '';
+      state.submitted = false;
+      draw();
+    }
+
+    // ========== 計時 ==========
+    function startHostTimer() {
       stopTimer();
-      timerInterval = setInterval(() => {
-        if (state.game.timeLeft > 0 && !state.game.showAnswer) {
-          // 本地倒數顯示（實際時間由主持人控制）
-          render();
+      timer = setInterval(() => {
+        if (state.game.time > 1 && !state.game.reveal) {
+          setGame({ time: state.game.time - 1 });
+        } else if (state.game.time <= 1 && !state.game.reveal) {
+          stopTimer();
+          setGame({ time: 0, reveal: true });
         }
       }, 1000);
     }
 
     function stopTimer() {
-      if (timerInterval) {
-        clearInterval(timerInterval);
-        timerInterval = null;
-      }
+      if (timer) { clearInterval(timer); timer = null; }
     }
 
-    // 主持人計時器
-    function hostTimer() {
+    // ========== 動作 ==========
+    function startGame() {
+      setGame({ on: true, q: 0, time: TIME_LIMIT, reveal: false, done: false });
+    }
+
+    function nextQ() {
       stopTimer();
-      timerInterval = setInterval(() => {
-        if (state.game.timeLeft > 1) {
-          updateGame({ timeLeft: state.game.timeLeft - 1 });
-        } else {
-          // 時間到，自動顯示答案
-          stopTimer();
-          updateGame({ timeLeft: 0, showAnswer: true });
-        }
-      }, 1000);
-    }
-
-    // ========== 主持人控制 ==========
-    function hostStartGame() {
-      updateGame({
-        started: true,
-        currentQuestion: 0,
-        timeLeft: QUESTION_TIME,
-        showAnswer: false,
-        ended: false
-      });
-      hostTimer();
-    }
-
-    function hostNextQuestion() {
-      const nextQ = state.game.currentQuestion + 1;
-      if (nextQ >= TOTAL_QUESTIONS) {
-        // 遊戲結束
-        stopTimer();
-        updateGame({ ended: true, showAnswer: false });
+      if (state.game.q + 1 >= TOTAL) {
+        setGame({ done: true, reveal: false });
       } else {
-        // 下一題，自動開始計時
-        updateGame({
-          currentQuestion: nextQ,
-          timeLeft: QUESTION_TIME,
-          showAnswer: false
-        });
-        hostTimer();
+        setGame({ q: state.game.q + 1, time: TIME_LIMIT, reveal: false });
       }
     }
 
-    // ========== 玩家提交答案 ==========
-    function submitAnswer() {
-      if (state.answered || !state.myAnswer.trim()) return;
+    function submit() {
+      if (state.submitted || !state.ans.trim()) return;
+      state.submitted = true;
       
-      const q = ALL_QUESTIONS[state.game.currentQuestion];
-      const correct = state.myAnswer.trim() === q.answer;
-      state.answered = true;
-      
-      if (correct) {
-        const timeBonus = Math.floor(state.game.timeLeft / 2);
-        const hintPenalty = state.usedHint ? 5 : 0;
-        const points = Math.max(10 - hintPenalty + timeBonus, 5);
-        state.myScore += points;
-        saveMyScore();
+      const q = ALL_QUESTIONS[state.game.q];
+      if (state.ans.trim() === q.answer) {
+        const bonus = Math.floor(state.game.time / 2);
+        const penalty = state.hinted ? 5 : 0;
+        state.score += Math.max(10 - penalty + bonus, 5);
+        saveScore();
       }
-      
-      render();
+      draw();
     }
 
-    function useHint() {
-      state.usedHint = true;
-      forceRender();
+    function getRank() {
+      const i = state.board.findIndex(p => p.name === state.name);
+      return i >= 0 ? i + 1 : null;
     }
 
-    // ========== 取得排名 ==========
-    function getMyRank() {
-      const idx = state.leaderboard.findIndex(p => p.name === state.playerName);
-      return idx >= 0 ? idx + 1 : null;
-    }
-
-    // 防止重複渲染導致鍵盤消失
-    let isInputFocused = false;
-    let lastRenderTime = 0;
-
-    // ========== 渲染 ==========
-    function render() {
-      // 如果輸入框正在使用，不要重新渲染（防止鍵盤消失）
-      if (isInputFocused && Date.now() - lastRenderTime < 500) {
-        return;
-      }
-      lastRenderTime = Date.now();
-      
+    // ========== 畫面 ==========
+    function draw() {
       const app = document.getElementById('app');
       
-      switch(state.screen) {
-        case 'welcome': app.innerHTML = welcomeScreen(); break;
-        case 'lobby': app.innerHTML = lobbyScreen(); break;
-        case 'game': app.innerHTML = gameScreen(); break;
-        case 'result': app.innerHTML = resultScreen(); break;
-        default: app.innerHTML = welcomeScreen();
+      // 自動跳轉
+      if (state.game.on && !state.game.done && state.screen === 'lobby') {
+        state.screen = 'game';
+      }
+      if (state.game.done && state.screen === 'game') {
+        state.screen = 'result';
+      }
+      if (!state.game.on && !state.game.done && state.screen === 'game') {
+        state.screen = 'lobby';
       }
       
+      let html = '';
+      switch(state.screen) {
+        case 'welcome': html = welcomeHTML(); break;
+        case 'lobby': html = lobbyHTML(); break;
+        case 'game': html = gameHTML(); break;
+        case 'result': html = resultHTML(); break;
+        default: html = welcomeHTML();
+      }
+      
+      app.innerHTML = html;
       bindEvents();
     }
-    
-    // 強制渲染（忽略輸入狀態）
-    function forceRender() {
-      isInputFocused = false;
-      lastRenderTime = 0;
-      render();
-    }
 
-    // ========== 歡迎畫面 ==========
-    function welcomeScreen() {
+    function welcomeHTML() {
       return `
         <div class="min-h-screen bg-gradient-to-br from-red-600 via-orange-500 to-yellow-400 flex items-center justify-center p-4">
           <div class="bg-white/95 rounded-3xl shadow-2xl p-8 max-w-md w-full text-center">
             <div class="emoji text-7xl mb-4">🎊</div>
             <h1 class="text-4xl font-black text-gray-800 mb-2">忘年會</h1>
             <h2 class="text-2xl font-bold text-orange-500 mb-8">Emoji 猜謎大賽</h2>
-            <div class="space-y-3">
-              <button id="btnPlayer" class="w-full py-4 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-2xl font-bold text-xl hover:opacity-90 transition shadow-lg">
-                👤 我是玩家
-              </button>
-              <button id="btnHost" class="w-full py-3 bg-gray-100 text-gray-600 rounded-2xl font-medium hover:bg-gray-200 transition">
-                🎤 主持人登入
-              </button>
-            </div>
+            <button id="btnP" class="w-full py-4 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-2xl font-bold text-xl mb-3">
+              👤 我是玩家
+            </button>
+            <button id="btnH" class="w-full py-3 bg-gray-100 text-gray-600 rounded-2xl font-medium">
+              🎤 主持人
+            </button>
           </div>
         </div>
       `;
     }
 
-    // ========== 等待大廳 ==========
-    function lobbyScreen() {
-      const playerCount = state.leaderboard.length;
-      
-      // 如果遊戲已開始，自動進入遊戲畫面
-      if (state.game.started && !state.game.ended) {
-        state.screen = 'game';
-        return gameScreen();
-      }
-      
-      // 如果遊戲結束，顯示結果
-      if (state.game.ended) {
-        state.screen = 'result';
-        return resultScreen();
-      }
+    function lobbyHTML() {
+      const n = state.board.length;
       
       if (state.isHost) {
         return `
           <div class="min-h-screen bg-gradient-to-br from-gray-800 to-gray-900 p-4">
             <div class="max-w-lg mx-auto">
               <div class="bg-white rounded-3xl shadow-2xl p-6 mb-4">
-                <h2 class="text-2xl font-black text-gray-800 mb-6 text-center">🎤 主持人控制台</h2>
-                
+                <h2 class="text-2xl font-black text-center mb-6">🎤 主持人</h2>
                 <div class="bg-blue-50 rounded-2xl p-4 mb-6 text-center">
-                  <p class="text-blue-600 font-bold text-lg">目前 ${playerCount} 位玩家已加入</p>
+                  <p class="text-blue-600 font-bold text-lg">${n} 位玩家已加入</p>
                 </div>
-                
-                <button id="btnStartGame" class="w-full py-4 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-2xl font-bold text-xl hover:opacity-90 transition shadow-lg mb-4">
+                <button id="btnStart" class="w-full py-4 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-2xl font-bold text-xl mb-4">
                   🚀 開始遊戲
                 </button>
-                
-                <div class="border-t pt-4">
-                  <button id="btnReset" class="w-full py-2 text-red-400 text-sm hover:text-red-600 transition">
-                    🗑️ 重置遊戲
-                  </button>
-                </div>
+                <button id="btnReset" class="w-full py-2 text-red-400 text-sm">🗑️ 重置</button>
               </div>
-              
               <div class="bg-white/90 rounded-2xl p-4">
-                <h3 class="font-bold text-gray-700 mb-3">📋 已加入的玩家</h3>
+                <h3 class="font-bold mb-3">📋 玩家列表</h3>
                 <div class="space-y-2 max-h-60 overflow-y-auto">
-                  ${state.leaderboard.length === 0 ? '<p class="text-gray-400 text-center py-4">等待玩家加入...</p>' :
-                    state.leaderboard.map(p => `
-                      <div class="bg-gray-50 rounded-xl px-4 py-2 font-medium">${p.name}</div>
-                    `).join('')}
-                </div>
-              </div>
-            </div>
-          </div>
-        `;
-      } else {
-        return `
-          <div class="min-h-screen bg-gradient-to-br from-red-600 via-orange-500 to-yellow-400 flex items-center justify-center p-4">
-            <div class="bg-white/95 rounded-3xl shadow-2xl p-8 max-w-md w-full text-center">
-              <div class="emoji text-6xl mb-4">⏳</div>
-              <h2 class="text-2xl font-black text-gray-800 mb-2">等待遊戲開始</h2>
-              <p class="text-gray-500 mb-6">玩家：${state.playerName}</p>
-              
-              <div class="bg-yellow-50 border-2 border-yellow-200 rounded-2xl p-6 mb-6">
-                <div class="animate-pulse">
-                  <div class="w-12 h-12 bg-yellow-300 rounded-full mx-auto mb-3"></div>
-                  <p class="text-yellow-700">等待主持人開始遊戲...</p>
-                  <p class="text-yellow-600 text-sm mt-2">目前 ${playerCount} 位玩家</p>
+                  ${n === 0 ? '<p class="text-gray-400 text-center py-4">等待中...</p>' :
+                    state.board.map(p => `<div class="bg-gray-50 rounded-xl px-4 py-2">${p.name}</div>`).join('')}
                 </div>
               </div>
             </div>
           </div>
         `;
       }
+      
+      return `
+        <div class="min-h-screen bg-gradient-to-br from-red-600 via-orange-500 to-yellow-400 flex items-center justify-center p-4">
+          <div class="bg-white/95 rounded-3xl shadow-2xl p-8 max-w-md w-full text-center">
+            <div class="emoji text-6xl mb-4">⏳</div>
+            <h2 class="text-2xl font-black mb-2">等待開始</h2>
+            <p class="text-gray-500 mb-6">${state.name}</p>
+            <div class="bg-yellow-50 border-2 border-yellow-200 rounded-2xl p-6">
+              <div class="animate-pulse">
+                <div class="w-12 h-12 bg-yellow-300 rounded-full mx-auto mb-3"></div>
+                <p class="text-yellow-700">等待主持人...</p>
+                <p class="text-yellow-600 text-sm mt-2">${n} 位玩家</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
     }
 
-    // ========== 遊戲畫面 ==========
-    function gameScreen() {
-      // 遊戲結束
-      if (state.game.ended) {
-        state.screen = 'result';
-        return resultScreen();
-      }
+    function gameHTML() {
+      const q = ALL_QUESTIONS[state.game.q];
+      const pct = ((state.game.q + 1) / TOTAL) * 100;
+      const t = state.game.time;
+      const show = state.game.reveal;
+      const correct = state.submitted && state.ans.trim() === q.answer;
       
-      // 遊戲未開始
-      if (!state.game.started) {
-        state.screen = 'lobby';
-        return lobbyScreen();
-      }
-      
-      const q = ALL_QUESTIONS[state.game.currentQuestion];
-      const progress = ((state.game.currentQuestion + 1) / TOTAL_QUESTIONS) * 100;
-      const timeLeft = state.game.timeLeft;
-      const showAnswer = state.game.showAnswer;
-      
-      // 判斷玩家是否答對
-      const isCorrect = state.answered && state.myAnswer.trim() === q.answer;
-      
-      // 顯示答案畫面（主持人和玩家都一樣）
-      if (showAnswer) {
+      if (show) {
+        // 答案揭曉畫面
         return `
           <div class="min-h-screen bg-gradient-to-br from-blue-500 to-indigo-600 p-4">
             <div class="max-w-2xl mx-auto">
-              <!-- 進度 -->
               <div class="bg-white/20 rounded-full h-2 mb-4">
-                <div class="bg-white h-full rounded-full transition-all" style="width:${progress}%"></div>
+                <div class="bg-white h-full rounded-full" style="width:${pct}%"></div>
               </div>
               <div class="text-white text-center mb-4">
                 <span class="font-bold">${q.round}</span>
-                <span class="opacity-70 ml-2">第 ${state.game.currentQuestion + 1}/${TOTAL_QUESTIONS} 題</span>
+                <span class="opacity-70 ml-2">${state.game.q + 1}/${TOTAL}</span>
               </div>
               
-              <!-- 題目 + 答案 -->
               <div class="bg-white rounded-3xl shadow-2xl p-6 mb-4">
-                <div class="text-center mb-6">
-                  <div class="emoji text-6xl md:text-7xl tracking-wider mb-4">${q.emoji}</div>
-                </div>
-                
+                <div class="emoji text-6xl text-center mb-4">${q.emoji}</div>
                 <div class="bg-green-100 border-2 border-green-400 rounded-2xl p-6 text-center mb-4">
-                  <p class="text-green-600 font-bold mb-2">✅ 正確答案</p>
+                  <p class="text-green-600 font-bold mb-2">✅ 答案</p>
                   <p class="text-4xl font-black text-green-700">${q.answer}</p>
                   <p class="text-green-600 mt-2">${q.explain}</p>
                 </div>
-                
                 ${!state.isHost ? `
-                  <div class="text-center py-2 rounded-xl ${isCorrect ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'} font-bold">
-                    ${isCorrect ? '🎉 你答對了！' : (state.answered ? '❌ 答錯了' : '⏰ 未作答')}
+                  <div class="text-center py-2 rounded-xl ${correct ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'} font-bold">
+                    ${correct ? '🎉 答對了！' : (state.submitted ? '❌ 答錯了' : '⏰ 未作答')}
                   </div>
                 ` : ''}
               </div>
               
-              <!-- 排行榜 -->
               <div class="bg-white rounded-3xl shadow-2xl p-6 mb-4">
-                <h3 class="text-xl font-black text-center mb-4">🏆 即時排行榜</h3>
+                <h3 class="text-xl font-black text-center mb-4">🏆 排行榜</h3>
                 <div class="space-y-2 max-h-48 overflow-y-auto">
-                  ${state.leaderboard.slice(0, 10).map((p, i) => `
-                    <div class="flex items-center justify-between rounded-xl px-4 py-2 ${i < 3 ? 'bg-gradient-to-r from-yellow-50 to-orange-50' : 'bg-gray-50'} ${p.name === state.playerName ? 'ring-2 ring-orange-400' : ''}">
-                      <div class="flex items-center gap-3">
-                        <span class="emoji text-xl w-8">${i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}</span>
+                  ${state.board.slice(0,10).map((p,i) => `
+                    <div class="flex justify-between items-center rounded-xl px-4 py-2 ${i<3?'bg-yellow-50':'bg-gray-50'} ${p.name===state.name?'ring-2 ring-orange-400':''}">
+                      <div class="flex items-center gap-2">
+                        <span class="emoji">${i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}</span>
                         <span class="font-bold">${p.name}</span>
                       </div>
                       <span class="font-black text-orange-500">${p.score}</span>
                     </div>
                   `).join('')}
-                  ${state.leaderboard.length === 0 ? '<p class="text-gray-400 text-center py-4">尚無分數</p>' : ''}
+                  ${state.board.length === 0 ? '<p class="text-gray-400 text-center py-4">尚無</p>' : ''}
                 </div>
               </div>
               
-              <!-- 主持人：下一題按鈕 -->
               ${state.isHost ? `
-                <button id="btnNextQuestion" class="w-full py-4 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-2xl font-bold text-xl hover:opacity-90 transition shadow-lg">
-                  ${state.game.currentQuestion + 1 >= TOTAL_QUESTIONS ? '🏁 查看最終結果' : '➡️ 下一題'}
+                <button id="btnNext" class="w-full py-4 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-2xl font-bold text-xl">
+                  ${state.game.q + 1 >= TOTAL ? '🏁 結果' : '➡️ 下一題'}
                 </button>
-              ` : `
-                <div class="text-center text-white/80">
-                  ⏳ 等待主持人進入下一題...
-                </div>
-              `}
+              ` : '<p class="text-center text-white/80">等待下一題...</p>'}
             </div>
           </div>
         `;
@@ -479,138 +392,97 @@
       return `
         <div class="min-h-screen bg-gradient-to-br from-blue-500 to-indigo-600 p-4">
           <div class="max-w-lg mx-auto">
-            <!-- 進度 -->
             <div class="bg-white/20 rounded-full h-2 mb-4">
-              <div class="bg-white h-full rounded-full transition-all" style="width:${progress}%"></div>
+              <div class="bg-white h-full rounded-full" style="width:${pct}%"></div>
             </div>
-            
-            <!-- 題目資訊 -->
             <div class="flex justify-between items-center text-white mb-4">
               <div>
                 <span class="font-bold">${q.round}</span>
-                <span class="opacity-70 ml-2">${state.game.currentQuestion + 1}/${TOTAL_QUESTIONS}</span>
+                <span class="opacity-70 ml-2">${state.game.q + 1}/${TOTAL}</span>
               </div>
-              <div class="text-3xl font-black ${timeLeft <= 5 ? 'text-red-300 animate-pulse' : ''}">
-                ⏱️ ${timeLeft}s
+              <div class="text-3xl font-black ${t <= 5 ? 'text-red-300 animate-pulse' : ''}">
+                ⏱️ ${t}
               </div>
             </div>
             
-            <!-- 題目 -->
-            <div class="bg-white rounded-3xl shadow-2xl p-6 mb-4">
-              <div class="text-center mb-6">
-                <div class="emoji text-6xl md:text-7xl tracking-wider">${q.emoji}</div>
-                ${state.usedHint ? `
-                  <div class="mt-4 inline-block bg-yellow-100 text-yellow-700 px-4 py-2 rounded-full text-sm">
-                    💡 提示：${q.hint}
-                  </div>
-                ` : ''}
-              </div>
+            <div class="bg-white rounded-3xl shadow-2xl p-6">
+              <div class="emoji text-6xl text-center mb-4">${q.emoji}</div>
+              ${state.hinted ? `<div class="text-center mb-4"><span class="bg-yellow-100 text-yellow-700 px-4 py-2 rounded-full text-sm">💡 ${q.hint}</span></div>` : ''}
               
-              ${!state.isHost ? `
-                <!-- 玩家輸入區 -->
-                ${state.answered ? `
-                  <div class="bg-blue-50 rounded-2xl p-4 text-center">
-                    <p class="text-blue-600 font-bold">已送出答案：${state.myAnswer}</p>
-                    <p class="text-blue-500 text-sm mt-1">等待時間結束揭曉答案...</p>
-                  </div>
-                ` : `
-                  <div class="space-y-3">
-                    <input type="text" id="answerInput" 
-                      value="${state.myAnswer}"
-                      placeholder="輸入你的答案..."
-                      autocomplete="off"
-                      autocorrect="off"
-                      autocapitalize="off"
-                      spellcheck="false"
-                      enterkeyhint="send"
-                      class="w-full px-5 py-4 border-2 border-gray-200 rounded-2xl text-xl text-center focus:border-orange-400 focus:outline-none font-medium">
-                    <div class="flex gap-3">
-                      <button id="btnSubmit" class="flex-1 py-4 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-2xl font-bold text-lg hover:opacity-90 transition shadow-lg">
-                        送出答案
-                      </button>
-                      <button id="btnHint" ${state.usedHint ? 'disabled' : ''} class="px-5 py-4 bg-yellow-400 text-yellow-900 rounded-2xl font-bold text-lg hover:bg-yellow-500 disabled:opacity-40 transition">
-                        💡
-                      </button>
-                    </div>
-                  </div>
-                `}
-                
-                <div class="mt-4 flex justify-between text-gray-400 text-sm">
-                  <span>${state.playerName}</span>
-                  <span>目前 ${state.myScore} 分</span>
+              ${state.isHost ? `
+                <div class="bg-gray-50 rounded-2xl p-4 text-center text-gray-600">
+                  ⏳ 等待玩家作答...
+                </div>
+              ` : (state.submitted ? `
+                <div class="bg-blue-50 rounded-2xl p-4 text-center">
+                  <p class="text-blue-600 font-bold">已送出：${state.ans}</p>
+                  <p class="text-blue-500 text-sm mt-1">等待揭曉...</p>
                 </div>
               ` : `
-                <!-- 主持人：等待時間結束 -->
-                <div class="bg-gray-50 rounded-2xl p-4 text-center">
-                  <p class="text-gray-600">⏳ 等待玩家作答中...</p>
+                <div class="space-y-3">
+                  <input type="text" id="ans" 
+                    placeholder="輸入答案..."
+                    autocomplete="off"
+                    autocorrect="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    class="w-full px-5 py-4 border-2 border-gray-200 rounded-2xl text-center font-medium text-lg">
+                  <div class="flex gap-3">
+                    <button id="btnSub" class="flex-1 py-4 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-2xl font-bold text-lg">
+                      送出
+                    </button>
+                    <button id="btnTip" ${state.hinted?'disabled':''} class="px-5 py-4 bg-yellow-400 text-yellow-900 rounded-2xl font-bold text-lg disabled:opacity-40">
+                      💡
+                    </button>
+                  </div>
                 </div>
-              `}
+              `)}
+              
+              ${!state.isHost ? `
+                <div class="mt-4 flex justify-between text-gray-400 text-sm">
+                  <span>${state.name}</span>
+                  <span>${state.score} 分</span>
+                </div>
+              ` : ''}
             </div>
           </div>
         </div>
       `;
     }
 
-    // ========== 結果畫面 ==========
-    function resultScreen() {
-      const rank = getMyRank();
-      const top3 = state.leaderboard.slice(0, 3);
+    function resultHTML() {
+      const rank = getRank();
+      const top = state.board.slice(0, 3);
       
       return `
         <div class="min-h-screen bg-gradient-to-br from-red-600 via-orange-500 to-yellow-400 p-4">
           <div class="max-w-lg mx-auto">
             <div class="bg-white/95 rounded-3xl shadow-2xl p-8 text-center mb-4">
               <div class="emoji text-7xl mb-4">🎉</div>
-              <h2 class="text-3xl font-black text-gray-800 mb-6">遊戲結束！</h2>
+              <h2 class="text-3xl font-black mb-6">遊戲結束！</h2>
               
-              <!-- 前三名 -->
               <div class="flex justify-center items-end gap-4 mb-8">
-                ${top3[1] ? `
-                  <div class="text-center">
-                    <div class="emoji text-4xl">🥈</div>
-                    <div class="bg-gray-100 rounded-xl px-4 py-3 mt-2">
-                      <p class="font-bold text-gray-700">${top3[1].name}</p>
-                      <p class="text-orange-500 font-black">${top3[1].score}</p>
-                    </div>
-                  </div>
-                ` : ''}
-                ${top3[0] ? `
-                  <div class="text-center -mt-4">
-                    <div class="emoji text-5xl">🥇</div>
-                    <div class="bg-yellow-100 rounded-xl px-6 py-4 mt-2 ring-2 ring-yellow-400">
-                      <p class="font-bold text-gray-700 text-lg">${top3[0].name}</p>
-                      <p class="text-orange-500 font-black text-xl">${top3[0].score}</p>
-                    </div>
-                  </div>
-                ` : ''}
-                ${top3[2] ? `
-                  <div class="text-center">
-                    <div class="emoji text-4xl">🥉</div>
-                    <div class="bg-orange-50 rounded-xl px-4 py-3 mt-2">
-                      <p class="font-bold text-gray-700">${top3[2].name}</p>
-                      <p class="text-orange-500 font-black">${top3[2].score}</p>
-                    </div>
-                  </div>
-                ` : ''}
+                ${top[1] ? `<div class="text-center"><div class="emoji text-4xl">🥈</div><div class="bg-gray-100 rounded-xl px-4 py-3 mt-2"><p class="font-bold">${top[1].name}</p><p class="text-orange-500 font-black">${top[1].score}</p></div></div>` : ''}
+                ${top[0] ? `<div class="text-center -mt-4"><div class="emoji text-5xl">🥇</div><div class="bg-yellow-100 rounded-xl px-6 py-4 mt-2 ring-2 ring-yellow-400"><p class="font-bold text-lg">${top[0].name}</p><p class="text-orange-500 font-black text-xl">${top[0].score}</p></div></div>` : ''}
+                ${top[2] ? `<div class="text-center"><div class="emoji text-4xl">🥉</div><div class="bg-orange-50 rounded-xl px-4 py-3 mt-2"><p class="font-bold">${top[2].name}</p><p class="text-orange-500 font-black">${top[2].score}</p></div></div>` : ''}
               </div>
               
               ${!state.isHost && rank ? `
-                <div class="bg-gradient-to-br from-orange-100 to-yellow-100 rounded-2xl p-6 mb-6">
-                  <p class="text-gray-500">${state.playerName}</p>
-                  <p class="text-4xl font-black text-orange-500">${state.myScore} 分</p>
+                <div class="bg-orange-100 rounded-2xl p-6 mb-6">
+                  <p class="text-gray-500">${state.name}</p>
+                  <p class="text-4xl font-black text-orange-500">${state.score} 分</p>
                   <p class="text-orange-600 mt-2">🎖️ 第 ${rank} 名</p>
                 </div>
               ` : ''}
             </div>
             
-            <!-- 完整排行榜 -->
             <div class="bg-white/95 rounded-3xl shadow-2xl p-6">
-              <h3 class="text-xl font-black text-center mb-4">🏆 完整排行榜</h3>
+              <h3 class="text-xl font-black text-center mb-4">🏆 排行榜</h3>
               <div class="space-y-2 max-h-64 overflow-y-auto">
-                ${state.leaderboard.map((p, i) => `
-                  <div class="flex items-center justify-between rounded-xl px-4 py-2 ${i < 3 ? 'bg-gradient-to-r from-yellow-50 to-orange-50' : 'bg-gray-50'} ${p.name === state.playerName ? 'ring-2 ring-orange-400' : ''}">
-                    <div class="flex items-center gap-3">
-                      <span class="emoji text-xl w-8">${i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}</span>
+                ${state.board.map((p,i) => `
+                  <div class="flex justify-between items-center rounded-xl px-4 py-2 ${i<3?'bg-yellow-50':'bg-gray-50'} ${p.name===state.name?'ring-2 ring-orange-400':''}">
+                    <div class="flex items-center gap-2">
+                      <span class="emoji">${i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}</span>
                       <span class="font-bold">${p.name}</span>
                     </div>
                     <span class="font-black text-orange-500">${p.score}</span>
@@ -619,103 +491,80 @@
               </div>
             </div>
             
-            ${state.isHost ? `
-              <button id="btnReset" class="w-full mt-4 py-4 bg-gray-800 text-white rounded-2xl font-bold hover:bg-gray-700 transition">
-                🔄 重新開始遊戲
-              </button>
-            ` : ''}
+            ${state.isHost ? `<button id="btnReset" class="w-full mt-4 py-4 bg-gray-800 text-white rounded-2xl font-bold">🔄 重新開始</button>` : ''}
           </div>
         </div>
       `;
     }
 
-    // ========== 事件綁定 ==========
+    // ========== 事件 ==========
     function bindEvents() {
       const $ = id => document.getElementById(id);
       
-      // 歡迎頁
-      $('btnPlayer')?.addEventListener('click', () => {
-        const name = prompt('請輸入你的名字：', state.playerName);
-        if (name && name.trim()) {
-          state.playerName = name.trim();
+      $('btnP')?.addEventListener('click', () => {
+        const n = prompt('請輸入名字：', state.name);
+        if (n?.trim()) {
+          state.name = n.trim();
           state.isHost = false;
-          localStorage.setItem('playerName', state.playerName);
-          // 加入排行榜（初始0分）
-          saveMyScore();
+          localStorage.setItem('playerName', state.name);
+          saveScore();
           state.screen = 'lobby';
-          forceRender();
+          draw();
         }
       });
       
-      $('btnHost')?.addEventListener('click', () => {
-        const pwd = prompt('請輸入主持人密碼：');
-        if (pwd === HOST_PASSWORD) {
+      $('btnH')?.addEventListener('click', () => {
+        const p = prompt('密碼：');
+        if (p === HOST_PWD) {
           state.isHost = true;
-          state.playerName = '主持人';
+          state.name = '主持人';
           state.screen = 'lobby';
-          forceRender();
-        } else if (pwd !== null) {
+          draw();
+        } else if (p !== null) {
           alert('密碼錯誤');
         }
       });
       
-      // 大廳
-      $('btnStartGame')?.addEventListener('click', hostStartGame);
-      $('btnReset')?.addEventListener('click', resetGame);
+      $('btnStart')?.addEventListener('click', startGame);
+      $('btnReset')?.addEventListener('click', resetAll);
+      $('btnNext')?.addEventListener('click', nextQ);
       
-      // 遊戲中 - 輸入框處理
-      const input = $('answerInput');
-      if (input) {
-        // 追蹤焦點狀態
-        input.addEventListener('focus', () => {
-          isInputFocused = true;
+      // 輸入框 - 特別處理 iOS
+      const ansInput = $('ans');
+      if (ansInput) {
+        // 儲存輸入值
+        ansInput.addEventListener('input', function(e) {
+          state.ans = this.value;
         });
         
-        input.addEventListener('blur', () => {
-          isInputFocused = false;
-        });
-        
-        // 即時更新答案
-        input.addEventListener('input', e => {
-          state.myAnswer = e.target.value;
+        // 中文輸入完成
+        ansInput.addEventListener('compositionend', function(e) {
+          state.ans = this.value;
         });
         
         // Enter 送出
-        input.addEventListener('keydown', e => {
+        ansInput.addEventListener('keypress', function(e) {
           if (e.key === 'Enter') {
             e.preventDefault();
-            input.blur();
-            submitAnswer();
+            submit();
           }
         });
         
-        // 中文輸入法完成
-        input.addEventListener('compositionend', e => {
-          state.myAnswer = e.target.value;
-        });
-        
-        // 防止觸控事件導致失焦
-        input.addEventListener('touchstart', e => {
-          e.stopPropagation();
-        });
+        // 設定初始值
+        ansInput.value = state.ans;
       }
       
-      $('btnSubmit')?.addEventListener('click', () => {
-        isInputFocused = false;
-        submitAnswer();
-      });
+      $('btnSub')?.addEventListener('click', submit);
       
-      $('btnHint')?.addEventListener('click', () => {
-        state.usedHint = true;
-        forceRender();
+      $('btnTip')?.addEventListener('click', () => {
+        state.hinted = true;
+        draw();
       });
-      
-      $('btnNextQuestion')?.addEventListener('click', hostNextQuestion);
     }
 
-    // ========== 初始化 ==========
-    initFirebase();
-    render();
+    // ========== 啟動 ==========
+    initFirebaseConnection();
+    draw();
   </script>
 </body>
 </html>
