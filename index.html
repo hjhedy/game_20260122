@@ -196,19 +196,21 @@
     function syncPlayerState() {
       const gs = state.gameState;
       if (!gs || gs.ended) return;
-      if (gs.round && gs.started) {
+      if (gs.round && gs.started && state.screen === 'waiting') {
         state.currentRound = gs.round;
         state.questions = [...QUESTIONS[gs.round]];
         state.currentIndex = gs.questionIndex || 0;
         state.timeLeft = gs.timeLeft || ROUND_CONFIG[gs.round].time;
+        state.timerActive = gs.timerActive || false;
         state.screen = 'game';
         state.answered = false;
         state.input = '';
         state.showHint = false;
         state.feedback = { text: '', type: '', explain: '' };
-        if (gs.timerActive && !state.timerActive) {
+        if (gs.timerActive) {
           startTimer();
         }
+        render();
       }
     }
 
@@ -498,25 +500,36 @@
     function waitingScreen() {
       const gs = state.gameState;
       const hasGame = gs && gs.started && !gs.ended;
+      
+      // Auto-join if game is running
+      if (hasGame && gs.round) {
+        state.currentRound = gs.round;
+        state.questions = [...QUESTIONS[gs.round]];
+        state.currentIndex = gs.questionIndex || 0;
+        state.timeLeft = gs.timeLeft || ROUND_CONFIG[gs.round].time;
+        state.timerActive = gs.timerActive || false;
+        state.answered = false;
+        state.input = '';
+        state.showHint = false;
+        state.feedback = { text: '', type: '', explain: '' };
+        state.screen = 'game';
+        if (gs.timerActive) startTimer();
+        setTimeout(() => render(), 100);
+        return '<div class="min-h-screen bg-gray-100 flex items-center justify-center"><p>載入中...</p></div>';
+      }
+      
       return `
         <div class="min-h-screen bg-gradient-to-br from-red-600 via-orange-500 to-yellow-400 flex items-center justify-center p-4">
           <div class="bg-white/95 rounded-3xl shadow-2xl p-8 max-w-md w-full text-center">
             <div class="emoji text-6xl mb-4">⏳</div>
             <h2 class="text-2xl font-black text-gray-800 mb-2">等待主持人</h2>
             <p class="text-gray-500 mb-6">玩家：${state.playerName}</p>
-            ${hasGame ? `
-              <div class="bg-green-50 border-2 border-green-200 rounded-2xl p-4 mb-6">
-                <p class="text-green-700 font-bold">🎮 遊戲已開始！</p>
-                <p class="text-green-600">${ROUND_CONFIG[gs.round]?.label || ''}</p>
+            <div class="bg-yellow-50 border-2 border-yellow-200 rounded-2xl p-6 mb-6">
+              <div class="animate-pulse">
+                <div class="w-12 h-12 bg-yellow-300 rounded-full mx-auto mb-3"></div>
+                <p class="text-yellow-700">等待主持人開始遊戲...</p>
               </div>
-            ` : `
-              <div class="bg-yellow-50 border-2 border-yellow-200 rounded-2xl p-6 mb-6">
-                <div class="animate-pulse">
-                  <div class="w-12 h-12 bg-yellow-300 rounded-full mx-auto mb-3"></div>
-                  <p class="text-yellow-700">等待主持人開始遊戲...</p>
-                </div>
-              </div>
-            `}
+            </div>
             <button id="btnBackHome" class="text-gray-500 hover:text-gray-700">← 返回</button>
           </div>
         </div>
