@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>忘年會 Emoji 猜謎大賽</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  <style>
+    * { -webkit-tap-highlight-color: transparent; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .animate-pulse-fast { animation: pulse 0.5s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+  <div id="app"></div>
+
+  <script>
+    // ========== Firebase 設定 ==========
+    // 🔥 請替換成你自己的 Firebase 設定
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT.firebaseapp.com",
+      databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+      projectId: "YOUR_PROJECT",
+      storageBucket: "YOUR_PROJECT.appspot.com",
+      messagingSenderId: "YOUR_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
+
+    // 初始化 Firebase
+    let db = null;
+    try {
+      firebase.initializeApp(firebaseConfig);
+      db = firebase.database();
+    } catch (e) {
+      console.log('Firebase not configured, using localStorage fallback');
+    }
+
+    // ========== 題庫 ==========
+    const QUESTIONS = {
+      practice: [
+        { emoji: '🧅⛽️🫓', answer: '蔥油餅', hint: '早餐', explain: '蔥＋油＋餅' },
+        { emoji: '🚗💦🐎🐲', answer: '車水馬龍', hint: '成語：熱鬧', explain: '車＋水＋馬＋龍' },
+      ],
+      A: [
+        { emoji: '🫅🌰🌈', answer: '王力宏', hint: '歌手', explain: '王＋力＋宏' },
+        { emoji: '🥗1️⃣🌳', answer: '蔡依林', hint: '歌手', explain: '蔡＋依＋林' },
+        { emoji: '🌹🪶🏰', answer: '紅毛城', hint: '台灣古蹟', explain: '紅＋毛＋城' },
+        { emoji: '🐮🍖🍜', answer: '牛肉麵', hint: '台灣美食', explain: '牛＋肉＋麵' },
+        { emoji: '🐷🩸🍰', answer: '豬血糕', hint: '夜市小吃', explain: '豬＋血＋糕' },
+        { emoji: '🦆👅🧢', answer: '鴨舌帽', hint: '穿戴用品', explain: '鴨＋舌＋帽' },
+        { emoji: '🖼️🐍➕🦶', answer: '畫蛇添足', hint: '成語', explain: '畫＋蛇＋添＋足' },
+      ],
+      B: [
+        { emoji: '🐅🗣️🐍🍑', answer: '虎頭蛇尾', hint: '成語', explain: '虎＋頭＋蛇＋尾' },
+        { emoji: '☀️🌙🌊', answer: '日月潭', hint: '台灣景點', explain: '日＋月＋潭' },
+        { emoji: '🐔✈️🐕🦘', answer: '雞飛狗跳', hint: '成語', explain: '雞＋飛＋狗＋跳' },
+        { emoji: '🌶️👶🐔', answer: '辣子雞', hint: '川菜', explain: '辣＋子＋雞' },
+        { emoji: '🐑🍖🧵', answer: '羊肉串', hint: '燒烤', explain: '羊＋肉＋串' },
+        { emoji: '🥬🗣️📝', answer: '菜英文', hint: '形容詞', explain: '菜＋英＋文' },
+        { emoji: '💣🐔🦵', answer: '炸雞腿', hint: '速食', explain: '炸＋雞＋腿' },
+      ],
+      challenge: [
+        { emoji: '💰🪡🍄', answer: '金針菇', hint: '蔬菜', explain: '金＋針＋菇' },
+        { emoji: '🐴🔜✅🎆', answer: '馬到成功', hint: '祝福語', explain: '馬＋到＋成＋功' },
+      ]
+    };
+
+    const HOST_PASSWORD = '2024';
+    const ROUND_CONFIG = {
+      practice: { gradient: 'from-gray-500 to-gray-600', label: '🎯 練習', time: 20 },
+      A: { gradient: 'from-blue-500 to-indigo-600', label: '🅰️ A組', time: 20 },
+      B: { gradient: 'from-emerald-500 to-teal-600', label: '🅱️ B組', time: 20 },
+      challenge: { gradient: 'from-rose-500 to-pink-600', label: '⚡ 挑戰', time: 12 }
+    };
+
+    // ========== 狀態管理 ==========
+    let state = {
+      screen: 'welcome',
+      mode: null,
+      playerName: '',
+      currentRound: null,
+      questions: [],
+      currentIndex: 0,
+      input: '',
+      score: 0,
+      showHint: false,
+      feedback: { text: '', type: '', explain: '' },
+      timeLeft: 0,
+      timerActive: false,
+      answered: false,
+      leaderboard: { A: [], B: [], challenge: [] },
+      gameState: null,
+      passwordInput: ''
+    };
+
+    let timerInterval = null;
+
+    // ========== Firebase / LocalStorage 操作 ==========
+    async function loadLeaderboard() {
+      if (db) {
+        try {
+          const snapshot = await db.ref('leaderboard').once('value');
+          if (snapshot.val()) {
+            state.leaderboard = snapshot.val();
+          }
+        } catch (e) { console.error(e); }
+      } else {
+        const saved = localStorage.getItem('emoji-leaderboard');
+        if (saved) state.leaderboard = JSON.parse(saved);
+      }
+    }
+
+    async function saveLeaderboard() {
+      if (db) {
+        try {
+          await db.ref('leaderboard').set(state.leaderboard);
+        } catch (e) { console.error(e); }
+      } else {
+        localStorage.setItem('emoji-leaderboard', JSON.stringify(state.leaderboard));
+      }
+    }
+
+    async function loadGameState() {
+      if (db) {
+        try {
+          const snapshot = await db.ref('gameState').once('value');
+          state.gameState = snapshot.val();
+        } catch (e) { console.error(e); }
+      } else {
+        const saved = localStorage.getItem('emoji-gameState');
+        if (saved) state.gameState = JSON.parse(saved);
+      }
+    }
+
+    async function saveGameState(gs) {
+      state.gameState = gs;
+      if (db) {
+        try {
+          await db.ref('gameState').set(gs);
+        } catch (e) { console.error(e); }
+      } else {
+        localStorage.setItem('emoji-gameState', JSON.stringify(gs));
+      }
+    }
+
+    function subscribeToUpdates() {
+      if (db) {
+        db.ref('leaderboard').on('value', (snapshot) => {
+          if (snapshot.val()) {
+            state.leaderboard = snapshot.val();
+            render();
+          }
+        });
+        db.ref('gameState').on('value', (snapshot) => {
+          const gs = snapshot.val();
+          if (gs && state.mode === 'player' && state.screen === 'game') {
+            syncPlayerToGameState(gs);
+          }
+          state.gameState = gs;
+          render();
+        });
+      } else {
+        setInterval(async () => {
+          await loadLeaderboard();
+          await loadGameState();
+          if (state.mode === 'player' && state.screen === 'game' && state.gameState) {
+            syncPlayerToGameState(state.gameState);
+          }
+          render();
+        }, 1000);
+      }
+    }
+
+    function syncPlayerToGameState(gs) {
+      if (!gs) return;
+      if (gs.round !== state.currentRound || gs.questionIndex !== state.currentIndex) {
+        state.currentRound = gs.round;
+        state.questions = [...QUESTIONS[gs.round]];
+        state.currentIndex = gs.questionIndex;
+        state.input = '';
+        state.showHint = false;
+        state.feedback = { text: '', type: '', explain: '' };
+        state.answered = false;
+        state.timeLeft = gs.timeLeft || 20;
+        state.timerActive = gs.timerActive || false;
+        if (gs.ended) {
+          state.screen = 'result';
+        }
+      } else {
+        if (gs.timerActive && !state.timerActive && !state.answered) {
+          startTimer();
+        }
+        if (!gs.timerActive && state.timerActive) {
+          stopTimer();
+        }
+      }
+    }
+
+    async function saveScore(round, name, score) {
+      await loadLeaderboard();
+      if (!state.leaderboard[round]) state.leaderboard[round] = [];
+      
+      const existingIdx = state.leaderboard[round].findIndex(e => e.name === name);
+      if (existingIdx >= 0) {
+        if (score > state.leaderboard[round][existingIdx].score) {
+          state.leaderboard[round][existingIdx].score = score;
+        }
+      } else {
+        state.leaderboard[round].push({ name, score });
+      }
+      
+      state.leaderboard[round].sort((a, b) => b.score - a.score);
+      state.leaderboard[round] = state.leaderboard[round].slice(0, 30);
+      
+      await saveLeaderboard();
+    }
+
+    async function resetLeaderboard() {
+      if (confirm('確定要清除所有排行榜資料嗎？')) {
+        state.leaderboard = { A: [], B: [], challenge: [] };
+        await saveLeaderboard();
+        render();
+      }
+    }
+
+    // ========== 計時器 ==========
+    function startTimer() {
+      state.timerActive = true;
+      stopTimer();
+      timerInterval = setInterval(() => {
+        if (state.timeLeft > 0 && !state.answered) {
+          state.timeLeft--;
+          render();
+        } else if (state.timeLeft === 0 && !state.answered) {
+          handleTimeout();
+        }
+      }, 1000);
+    }
+
+    function stopTimer() {
+      state.timerActive = false;
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+    }
+
+    function handleTimeout() {
+      stopTimer();
+      state.answered = true;
+      const current = state.questions[state.currentIndex];
+      state.feedback = { text: `⏰ 時間到！`, type: 'timeout', explain: '' };
+      render();
+    }
+
+    // ========== 遊戲邏輯 ==========
+    async function hostStartRound(round) {
+      state.currentRound = round;
+      state.questions = [...QUESTIONS[round]];
+      state.currentIndex = 0;
+      state.timeLeft = ROUND_CONFIG[round].time;
+      state.timerActive = false;
+      state.answered = false;
+      state.feedback = { text: '', type: '', explain: '' };
+      state.screen = 'game';
+      
+      await saveGameState({
+        round,
+        questionIndex: 0,
+        timeLeft: ROUND_CONFIG[round].time,
+        timerActive: false,
+        showAnswer: false,
+        ended: false
+      });
+      render();
+    }
+
+    async function hostStartTimer() {
+      state.timerActive = true;
+      startTimer();
+      await saveGameState({
+        ...state.gameState,
+        timerActive: true,
+        timeLeft: state.timeLeft
+      });
+      render();
+    }
+
+    async function hostShowAnswer() {
+      stopTimer();
+      const current = state.questions[state.currentIndex];
+      state.feedback = { text: `${current.answer}`, type: 'answer', explain: current.explain };
+      await saveGameState({
+        ...state.gameState,
+        timerActive: false,
+        showAnswer: true
+      });
+      render();
+    }
+
+    async function hostNextQuestion() {
+      if (state.currentIndex + 1 >= state.questions.length) {
+        state.screen = 'result';
+        await saveGameState({ ...state.gameState, ended: true });
+      } else {
+        state.currentIndex++;
+        state.timeLeft = ROUND_CONFIG[state.currentRound].time;
+        state.timerActive = false;
+        state.feedback = { text: '', type: '', explain: '' };
+        state.answered = false;
+        
+        await saveGameState({
+          round: state.currentRound,
+          questionIndex: state.currentIndex,
+          timeLeft: state.timeLeft,
+          timerActive: false,
+          showAnswer: false,
+          ended: false
+        });
+      }
+      render();
+    }
+
+    function playerStartRound(round) {
+      state.currentRound = round;
+      state.questions = [...QUESTIONS[round]];
+      state.currentIndex = state.gameState?.questionIndex || 0;
+      state.score = 0;
+      state.timeLeft = state.gameState?.timeLeft || ROUND_CONFIG[round].time;
+      state.timerActive = state.gameState?.timerActive || false;
+      state.answered = false;
+      state.feedback = { text: '', type: '', explain: '' };
+      state.screen = 'game';
+      
+      if (state.timerActive) startTimer();
+      render();
+    }
+
+    async function playerSubmit() {
+      if (state.answered) return;
+      
+      const current = state.questions[state.currentIndex];
+      const correct = state.input.trim() === current.answer;
+      state.answered = true;
+      stopTimer();
+      
+      if (correct) {
+        const timeBonus = Math.floor(state.timeLeft / 2);
+        const hintPenalty = state.showHint ? 5 : 0;
+        const points = Math.max(10 - hintPenalty + timeBonus, 5);
+        state.score += points;
+        state.feedback = { text: `✅ 正確！+${points}分`, type: 'correct', explain: current.explain };
+      } else {
+        state.feedback = { text: `❌ 錯誤`, type: 'wrong', explain: '' };
+      }
+      
+      if (state.currentRound !== 'practice' && state.playerName) {
+        await saveScore(state.currentRound, state.playerName, state.score);
+      }
+      render();
+    }
+
+    function getRank(round) {
+      const list = state.leaderboard[round] || [];
+      const idx = list.findIndex(e => e.name === state.playerName);
+      return idx >= 0 ? idx + 1 : null;
+    }
+
+    // ========== 渲染 ==========
+    function render() {
+      const app = document.getElementById('app');
+      app.innerHTML = getScreenHTML();
+      attachEventListeners();
+    }
+
+    function getScreenHTML() {
+      switch (state.screen) {
+        case 'welcome': return welcomeScreen();
+        case 'hostLogin': return hostLoginScreen();
+        case 'hostPanel': return hostPanelScreen();
+        case 'home': return homeScreen();
+        case 'leaderboard': return leaderboardScreen();
+        case 'game': return gameScreen();
+        case 'result': return resultScreen();
+        default: return welcomeScreen();
+      }
+    }
+
+    function welcomeScreen() {
+      return `
+        <div class="min-h-screen bg-gradient-to-br from-red-600 via-orange-500 to-yellow-400 flex items-center justify-center p-4">
+          <div class="bg-white/95 backdrop-blur rounded-3xl shadow-2xl p-8 max-w-md w-full text-center">
+            <div class="text-7xl mb-4">🎊</div>
+            <h1 class="text-4xl font-black text-gray-800 mb-2">忘年會</h1>
+            <h2 class="text-2xl font-bold text-orange-500 mb-8">Emoji 猜謎大賽</h2>
+            
+            <div class="space-y-3">
+              <button onclick="goToPlayer()" class="w-full py-4 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-2xl font-bold text-xl hover:opacity-90 transition shadow-lg">
+                👤 我是玩家
+              </button>
+              <button onclick="goToHostLogin()" class="w-full py-3 bg-gray-100 text-gray-600 rounded-2xl font-medium hover:bg-gray-200 transition">
+                🎤 主持人登入
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function hostLoginScreen() {
+      const wrongPassword = state.passwordInput && state.passwordInput !== HOST_PASSWORD;
+      return `
+        <div class="min-h-screen bg-gradient-to-br from-gray-800 to-gray-900 flex items-center justify-center p-4">
+          <div class="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full text-center">
+            <div class="text-5xl mb-4">🎤</div>
+            <h2 class="text-2xl font-black text-gray-800 mb-6">主持人登入</h2>
+            <input type="password" id="passwordInput" value="${state.passwordInput}" placeholder="請輸入密碼" 
+              class="w-full px-5 py-4 border-2 border-gray-200 rounded-2xl text-lg mb-4 focus:border-orange-400 focus:outline-none text-center">
+            ${wrongPassword ? '<p class="text-red-500 mb-4">密碼錯誤</p>' : ''}
+            <div class="space-y-3">
+              <button onclick="tryHostLogin()" class="w-full py-4 bg-gradient-to-r from-purple-500 to-indigo-600 text-white rounded-2xl font-bold text-lg hover:opacity-90 transition shadow-lg">
+                登入
+              </button>
+              <button onclick="goToWelcome()" class="w-full py-3 text-gray-500 hover:text-gray-700">
+                ← 返回
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function hostPanelScreen() {
+      const counts = {
+        A: (state.leaderboard.A || []).length,
+        B: (state.leaderboard.B || []).length,
+        challenge: (state.leaderboard.challenge || []).length
+      };
+      return `
+        <div class="min-h-screen bg-gradient-to-br from-gray-800 to-gray-900 p-4">
+          <div class="max-w-lg mx-auto">
+            <div class="bg-white rounded-3xl shadow-2xl p-6 mb-4">
+              <div class="flex items-center justify-between mb-6">
+                <h2 class="text-2xl font-black text-gray-800">🎤 主持人控制台</h2>
+                <button onclick="goToWelcome()" class="text-gray-400 hover:text-gray-600">登出</button>
+              </div>
+              
+              <div class="space-y-3 mb-6">
+                <p class="text-sm text-gray-500 font-medium">選擇關卡開始遊戲：</p>
+                <button onclick="hostStartRound('practice')" class="w-full py-4 bg-gray-100 text-gray-700 rounded-2xl font-bold hover:bg-gray-200 transition flex items-center justify-center gap-3">
+                  🎯 練習題（2題）
+                </button>
+                <button onclick="hostStartRound('A')" class="w-full py-4 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-2xl font-bold hover:opacity-90 transition shadow-lg">
+                  🅰️ A組競賽（7題）
+                </button>
+                <button onclick="hostStartRound('B')" class="w-full py-4 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-2xl font-bold hover:opacity-90 transition shadow-lg">
+                  🅱️ B組競賽（7題）
+                </button>
+                <button onclick="hostStartRound('challenge')" class="w-full py-4 bg-gradient-to-r from-rose-500 to-pink-600 text-white rounded-2xl font-bold hover:opacity-90 transition shadow-lg">
+                  ⚡ 挑戰賽（2題）
+                </button>
+              </div>
+              
+              <div class="border-t pt-4">
+                <button onclick="goToLeaderboard()" class="w-full py-3 text-orange-600 font-bold hover:bg-orange-50 rounded-xl transition mb-2">
+                  🏆 查看排行榜
+                </button>
+                <button onclick="resetLeaderboard()" class="w-full py-2 text-red-400 text-sm hover:text-red-600 transition">
+                  🗑️ 重置排行榜
+                </button>
+              </div>
+            </div>
+            
+            <div class="bg-white/90 rounded-2xl p-4">
+              <h3 class="font-bold text-gray-700 mb-2">📊 目前參與人數</h3>
+              <div class="grid grid-cols-3 gap-2 text-center">
+                <div class="bg-blue-50 rounded-xl p-3">
+                  <p class="text-2xl font-black text-blue-600">${counts.A}</p>
+                  <p class="text-xs text-gray-500">A組</p>
+                </div>
+                <div class="bg-green-50 rounded-xl p-3">
+                  <p class="text-2xl font-black text-green-600">${counts.B}</p>
+                  <p class="text-xs text-gray-500">B組</p>
+                </div>
+                <div class="bg-pink-50 rounded-xl p-3">
+                  <p class="text-2xl font-black text-pink-600">${counts.challenge}</p>
+                  <p class="text-xs text-gray-500">挑戰</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function homeScreen() {
+      const currentGame = state.gameState?.round && !state.gameState?.ended;
+      const gs = state.gameState;
+      
+      return `
+        <div class="min-h-screen bg-gradient-to-br from-red-600 via-orange-500 to-yellow-400 flex items-center justify-center p-4">
+          <div class="bg-white/95 backdrop-blur rounded-3xl shadow-2xl p-8 max-w-md w-full">
+            <div class="text-center mb-6">
+              <div class="text-6xl mb-3">🎯</div>
+              <h1 class="text-2xl font-black text-gray-800">準備開始</h1>
+            </div>
+            
+            <input type="text" id="playerNameInput" value="${state.playerName}" placeholder="✏️ 請輸入你的名字"
+              class="w-full px-5 py-4 border-2 border-gray-200 rounded-2xl text-lg mb-6 focus:border-orange-400 focus:outline-none text-center font-medium">
+            
+            ${currentGame ? `
+              <div class="space-y-4">
+                <div class="bg-green-50 border-2 border-green-200 rounded-2xl p-4 text-center">
+                  <p class="text-green-700 font-bold">🎮 遊戲進行中！</p>
+                  <p class="text-green-600">${ROUND_CONFIG[gs.round].label}</p>
+                </div>
+                <button onclick="joinGame('${gs.round}')" class="w-full py-4 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-2xl font-bold text-xl hover:opacity-90 transition shadow-lg">
+                  加入遊戲 →
+                </button>
+              </div>
+            ` : `
+              <div class="bg-yellow-50 border-2 border-yellow-200 rounded-2xl p-6 text-center">
+                <p class="text-yellow-700 font-bold text-lg mb-2">⏳ 等待主持人開始遊戲</p>
+                <p class="text-yellow-600 text-sm">請稍候...</p>
+                <div class="mt-4">
+                  <div class="w-8 h-8 bg-yellow-300 rounded-full mx-auto animate-pulse"></div>
+                </div>
+              </div>
+            `}
+            
+            <button onclick="goToLeaderboard()" class="w-full mt-6 py-3 text-orange-600 font-bold hover:bg-orange-50 rounded-xl transition">
+              🏆 查看排行榜
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    function leaderboardScreen() {
+      const renderList = (round, label) => {
+        const list = state.leaderboard[round] || [];
+        return `
+          <div class="mb-6">
+            <h3 class="font-bold text-xl mb-3">${label}</h3>
+            <div class="bg-gray-50 rounded-2xl overflow-hidden">
+              ${list.length === 0 ? `<p class="text-gray-400 text-center py-6">尚無紀錄</p>` : `
+                <div class="divide-y divide-gray-100">
+                  ${list.slice(0, 10).map((entry, idx) => `
+                    <div class="flex items-center justify-between px-4 py-3 ${idx < 3 ? 'bg-gradient-to-r from-yellow-50 to-orange-50' : ''} ${entry.name === state.playerName ? 'ring-2 ring-orange-400' : ''}">
+                      <div class="flex items-center gap-3">
+                        <span class="text-2xl w-8">
+                          ${idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `<span class="text-gray-400 text-lg font-bold">${idx + 1}</span>`}
+                        </span>
+                        <span class="font-bold ${entry.name === state.playerName ? 'text-orange-600' : 'text-gray-800'}">${entry.name}</span>
+                      </div>
+                      <span class="font-black text-orange-500 text-xl">${entry.score}</span>
+                    </div>
+                  `).join('')}
+                </div>
+              `}
+            </div>
+          </div>
+        `;
+      };
+      
+      return `
+        <div class="min-h-screen bg-gradient-to-br from-red-600 via-orange-500 to-yellow-400 p-4">
+          <div class="max-w-lg mx-auto">
+            <button onclick="goBack()" class="mb-4 text-white font-bold flex items-center gap-2 hover:underline text-lg">
+              ← 返回
+            </button>
+            <div class="bg-white/95 backdrop-blur rounded-3xl shadow-2xl p-6">
+              <h2 class="text-3xl font-black text-center mb-2">🏆 即時排行榜</h2>
+              <p class="text-center text-gray-400 text-sm mb-6">自動更新中</p>
+              ${renderList('A', '🅰️ A組')}
+              ${renderList('B', '🅱️ B組')}
+              ${renderList('challenge', '⚡ 挑戰賽')}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function gameScreen() {
+      if (state.mode === 'host') return hostGameScreen();
+      return playerGameScreen();
+    }
+
+    function hostGameScreen() {
+      const current = state.questions[state.currentIndex];
+      if (!current) return '';
+      
+      const config = ROUND_CONFIG[state.currentRound];
+      const progress = ((state.currentIndex + 1) / state.questions.length) * 100;
+      const showingAnswer = state.feedback.type === 'answer';
+      const list = state.leaderboard[state.currentRound] || [];
+      
+      if (showingAnswer) {
+        return `
+          <div class="min-h-screen bg-gradient-to-br ${config.gradient} p-4">
+            <div class="max-w-4xl mx-auto grid md:grid-cols-2 gap-4">
+              <div class="bg-white rounded-3xl shadow-2xl p-6">
+                <div class="text-center mb-4">
+                  <span class="text-sm text-gray-500">${config.label} 第 ${state.currentIndex + 1}/${state.questions.length} 題</span>
+                </div>
+                <div class="bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl p-8 mb-6 text-center">
+                  <div class="text-7xl tracking-[0.2em] mb-4">${current.emoji}</div>
+                </div>
+                <div class="bg-green-100 border-2 border-green-300 rounded-2xl p-6 text-center mb-6">
+                  <p class="text-sm text-green-600 mb-2">✅ 正確答案</p>
+                  <p class="text-4xl font-black text-green-700 mb-2">${current.answer}</p>
+                  <p class="text-lg text-green-600">${current.explain}</p>
+                </div>
+                <button onclick="hostNextQuestion()" class="w-full py-4 bg-blue-500 text-white rounded-2xl font-bold text-xl hover:bg-blue-600 transition shadow-lg">
+                  ${state.currentIndex + 1 >= state.questions.length ? '🏁 結束本回合' : '➡️ 下一題'}
+                </button>
+              </div>
+              
+              <div class="bg-white rounded-3xl shadow-2xl p-6">
+                <h3 class="text-2xl font-black text-center mb-4">🏆 目前排行榜</h3>
+                <div class="space-y-2">
+                  ${list.slice(0, 10).map((entry, idx) => `
+                    <div class="flex items-center justify-between rounded-xl px-4 py-3 ${idx < 3 ? 'bg-gradient-to-r from-yellow-50 to-orange-50' : 'bg-gray-50'}">
+                      <div class="flex items-center gap-3">
+                        <span class="text-2xl w-10">
+                          ${idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `<span class="text-gray-400 font-bold">${idx + 1}</span>`}
+                        </span>
+                        <span class="font-bold text-lg">${entry.name}</span>
+                      </div>
+                      <span class="font-black text-2xl text-orange-500">${entry.score}</span>
+                    </div>
+                  `).join('')}
+                  ${list.length === 0 ? '<p class="text-gray-400 text-center py-8">尚無玩家作答</p>' : ''}
+                </div>
+                <p class="text-center text-gray-400 text-sm mt-4">共 ${list.length} 位玩家</p>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+      
+      return `
+        <div class="min-h-screen bg-gradient-to-br ${config.gradient} p-4">
+          <div class="max-w-2xl mx-auto">
+            <div class="bg-white rounded-3xl shadow-2xl p-6 mb-4">
+              <div class="flex justify-between items-center mb-4">
+                <div class="font-bold text-gray-600">
+                  ${config.label}
+                  <span class="ml-2 text-gray-400">${state.currentIndex + 1}/${state.questions.length}</span>
+                </div>
+                <div class="text-4xl font-black ${state.timeLeft <= 5 && state.timerActive ? 'text-red-500 animate-pulse' : 'text-gray-700'}">
+                  ⏱️ ${state.timeLeft}s
+                </div>
+              </div>
+              
+              <div class="h-3 bg-gray-200 rounded-full mb-6 overflow-hidden">
+                <div class="h-full bg-gradient-to-r ${config.gradient} transition-all" style="width: ${progress}%"></div>
+              </div>
+              
+              <div class="bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl p-12 mb-6 text-center">
+                <div class="text-8xl tracking-[0.3em]">${current.emoji}</div>
+              </div>
+              
+              <div class="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4 mb-6">
+                <p class="text-sm text-yellow-600 mb-1">📋 答案（僅主持人可見）</p>
+                <p class="text-2xl font-black text-yellow-700">${current.answer}</p>
+                <p class="text-sm text-yellow-600">${current.explain}</p>
+              </div>
+              
+              <div class="grid grid-cols-2 gap-3">
+                <button onclick="hostStartTimer()" ${state.timerActive ? 'disabled' : ''} class="py-4 bg-green-500 text-white rounded-2xl font-bold text-lg hover:bg-green-600 disabled:opacity-40 transition">
+                  ▶️ 開始計時
+                </button>
+                <button onclick="hostShowAnswer()" class="py-4 bg-yellow-500 text-white rounded-2xl font-bold text-lg hover:bg-yellow-600 transition">
+                  👁️ 顯示答案
+                </button>
+              </div>
+              
+              <button onclick="goToHostPanel()" class="w-full mt-4 py-2 text-gray-400 hover:text-gray-600">
+                ← 返回控制台
+              </button>
+            </div>
+            
+            <div class="bg-white/90 rounded-2xl p-4">
+              <h3 class="font-bold text-gray-700 mb-3">📊 即時排名 Top 5</h3>
+              <div class="space-y-2">
+                ${list.slice(0, 5).map((entry, idx) => `
+                  <div class="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-2">
+                    <div class="flex items-center gap-2">
+                      <span>${idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}.`}</span>
+                      <span class="font-medium">${entry.name}</span>
+                    </div>
+                    <span class="font-bold text-orange-500">${entry.score}</span>
+                  </div>
+                `).join('')}
+                ${list.length === 0 ? '<p class="text-gray-400 text-center py-2">等待玩家作答...</p>' : ''}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function playerGameScreen() {
+      const current = state.questions[state.currentIndex];
+      if (!current) return '';
+      
+      const config = ROUND_CONFIG[state.currentRound];
+      const progress = ((state.currentIndex + 1) / state.questions.length) * 100;
+      
+      const feedbackClass = state.feedback.type === 'correct' ? 'bg-green-100 text-green-600' :
+                           state.feedback.type === 'wrong' ? 'bg-red-100 text-red-600' :
+                           'bg-yellow-100 text-yellow-700';
+      
+      return `
+        <div class="min-h-screen bg-gradient-to-br ${config.gradient} flex items-center justify-center p-4">
+          <div class="bg-white/95 backdrop-blur rounded-3xl shadow-2xl p-6 max-w-md w-full">
+            <div class="flex justify-between items-center mb-4">
+              <div class="font-bold text-gray-600">
+                ${config.label}
+                <span class="ml-2 text-gray-400">${state.currentIndex + 1}/${state.questions.length}</span>
+              </div>
+              <div class="flex items-center gap-4">
+                <div class="text-2xl font-black ${state.timeLeft <= 5 && state.timerActive ? 'text-red-500 animate-pulse' : 'text-gray-700'}">
+                  ${state.timerActive ? `${state.timeLeft}s` : '⏸️'}
+                </div>
+                <div class="bg-orange-100 text-orange-600 font-black text-lg px-3 py-1 rounded-full">
+                  ${state.score}分
+                </div>
+              </div>
+            </div>
+            
+            <div class="h-2 bg-gray-200 rounded-full mb-6 overflow-hidden">
+              <div class="h-full bg-gradient-to-r ${config.gradient} transition-all" style="width: ${progress}%"></div>
+            </div>
+            
+            <div class="bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl p-10 mb-6 text-center">
+              <div class="text-6xl md:text-7xl tracking-[0.2em]">${current.emoji}</div>
+              ${state.showHint ? `
+                <div class="mt-6 inline-block bg-yellow-100 text-yellow-700 px-4 py-2 rounded-full text-sm font-medium">
+                  💡 提示：${current.hint}
+                </div>
+              ` : ''}
+            </div>
+            
+            ${!state.timerActive && !state.answered ? `
+              <div class="bg-blue-50 border-2 border-blue-200 rounded-2xl p-4 text-center mb-4">
+                <p class="text-blue-700 font-bold">⏳ 等待主持人開始計時...</p>
+              </div>
+            ` : ''}
+            
+            ${state.feedback.text ? `
+              <div class="text-center mb-4 py-3 rounded-2xl font-bold text-lg ${feedbackClass}">
+                <div>${state.feedback.text}</div>
+                ${state.feedback.explain ? `<div class="text-sm font-normal mt-1 opacity-80">${state.feedback.explain}</div>` : ''}
+              </div>
+            ` : ''}
+            
+            ${state.timerActive && !state.answered ? `
+              <div class="mb-4">
+                <input type="text" id="answerInput" value="${state.input}" placeholder="輸入答案..."
+                  class="w-full px-5 py-4 border-2 border-gray-200 rounded-2xl text-xl text-center focus:border-orange-400 focus:outline-none transition font-medium">
+              </div>
+              <div class="flex gap-3">
+                <button onclick="playerSubmit()" class="flex-1 py-4 bg-gradient-to-r ${config.gradient} text-white rounded-2xl font-bold text-lg hover:opacity-90 transition shadow-lg">
+                  確認送出
+                </button>
+                <button onclick="showHint()" ${state.showHint ? 'disabled' : ''} class="px-6 py-4 bg-yellow-400 text-yellow-900 rounded-2xl font-bold text-xl hover:bg-yellow-500 disabled:opacity-40 transition">
+                  💡
+                </button>
+              </div>
+            ` : ''}
+            
+            ${state.answered ? `
+              <div class="bg-gray-100 rounded-2xl p-4 text-center">
+                <p class="text-gray-600">⏳ 等待主持人進入下一題...</p>
+              </div>
+            ` : ''}
+            
+            <div class="mt-4 text-center text-gray-400 text-sm">${state.playerName}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function resultScreen() {
+      const rank = state.currentRound !== 'practice' ? getRank(state.currentRound) : null;
+      
+      return `
+        <div class="min-h-screen bg-gradient-to-br from-red-600 via-orange-500 to-yellow-400 flex items-center justify-center p-4">
+          <div class="bg-white/95 backdrop-blur rounded-3xl shadow-2xl p-8 max-w-md w-full text-center">
+            <div class="text-7xl mb-4">🎉</div>
+            <h2 class="text-2xl font-black text-gray-800 mb-4">
+              ${state.currentRound === 'practice' ? '練習完成！' : '本回合結束！'}
+            </h2>
+            
+            ${state.mode === 'player' ? `
+              <div class="bg-gradient-to-br from-orange-100 to-yellow-100 rounded-2xl p-6 mb-6">
+                <p class="text-gray-500">${state.playerName}</p>
+                <p class="text-5xl font-black text-orange-500">${state.score} 分</p>
+                ${rank ? `<p class="text-orange-600 mt-2">目前第 ${rank} 名</p>` : ''}
+              </div>
+            ` : ''}
+            
+            <div class="space-y-3">
+              <button onclick="goBack()" class="w-full py-4 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-2xl font-bold hover:opacity-90 transition shadow-lg">
+                ${state.mode === 'host' ? '返回控制台' : '返回首頁'}
+              </button>
+              <button onclick="goToLeaderboard()" class="w-full py-4 bg-gray-100 text-gray-700 rounded-2xl font-bold hover:bg-gray-200 transition">
+                🏆 查看排行榜
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // ========== 事件處理 ==========
+    function attachEventListeners() {
+      const passwordInput = document.getElementById('passwordInput');
+      if (passwordInput) {
+        passwordInput.addEventListener('input', (e) => { state.passwordInput = e.target.value; });
+        passwordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryHostLogin(); });
+      }
+      
+      const playerNameInput = document.getElementById('playerNameInput');
+      if (playerNameInput) {
+        playerNameInput.addEventListener('input', (e) => { state.playerName = e.target.value; });
+      }
+      
+      const answerInput = document.getElementById('answerInput');
+      if (answerInput) {
+        answerInput.addEventListener('input', (e) => { state.input = e.target.value; });
+        answerInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') playerSubmit(); });
+        answerInput.focus();
+      }
+    }
+
+    // ========== 導航函數 ==========
+    function goToWelcome() { state.screen = 'welcome'; state.mode = null; render(); }
+    function goToPlayer() { state.mode = 'player'; state.screen = 'home'; render(); }
+    function goToHostLogin() { state.screen = 'hostLogin'; render(); }
+    function goToHostPanel() { state.screen = 'hostPanel'; render(); }
+    function goToLeaderboard() { state.screen = 'leaderboard'; render(); }
+    function goBack() {
+      if (state.mode === 'host') state.screen = 'hostPanel';
+      else state.screen = 'home';
+      render();
+    }
+    
+    function tryHostLogin() {
+      const input = document.getElementById('passwordInput');
+      state.passwordInput = input ? input.value : state.passwordInput;
+      if (state.passwordInput === HOST_PASSWORD) {
+        state.mode = 'host';
+        state.screen = 'hostPanel';
+      }
+      render();
+    }
+    
+    function joinGame(round) {
+      const input = document.getElementById('playerNameInput');
+      state.playerName = input ? input.value : state.playerName;
+      if (state.playerName.trim()) {
+        playerStartRound(round);
+      }
+    }
+    
+    function showHint() {
+      state.showHint = true;
+      render();
+    }
+
+    // ========== 初始化 ==========
+    async function init() {
+      await loadLeaderboard();
+      await loadGameState();
+      subscribeToUpdates();
+      render();
+    }
+
+    init();
+  </script>
+</body>
+</html>
